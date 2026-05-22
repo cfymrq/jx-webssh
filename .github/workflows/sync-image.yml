@@ -29,13 +29,9 @@ jobs:
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           DATE_CN=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M CST')
 
-          # 拉取上游最新镜像
           docker pull cmliu/webssh:latest
-
-          # 获取上游 digest
           UPSTREAM_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' cmliu/webssh:latest | cut -d'@' -f2)
 
-          # 尝试获取本仓库当前 digest（如果存在）
           CURRENT_DIGEST=""
           if docker pull ghcr.io/${REPO_LOWER}:latest 2>/dev/null; then
             CURRENT_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${REPO_LOWER}:latest | cut -d'@' -f2 || echo "")
@@ -46,7 +42,6 @@ jobs:
           echo "repo_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
           echo "date_cn=$DATE_CN" >> $GITHUB_OUTPUT
 
-          # 判断是否有更新
           if [ "$UPSTREAM_DIGEST" != "$CURRENT_DIGEST" ]; then
             echo "has_update=true" >> $GITHUB_OUTPUT
             echo "✅ 检测到新版本，开始同步..."
@@ -61,39 +56,39 @@ jobs:
           REPO_LOWER="${{ steps.sync.outputs.repo_lower }}"
           docker tag cmliu/webssh:latest ghcr.io/${REPO_LOWER}:latest
           docker push ghcr.io/${REPO_LOWER}:latest
-          echo "✅ 已推送 ghcr.io/${REPO_LOWER}:latest"
 
       - name: Update README.md
+        env:
+          REPO_LOWER: ${{ steps.sync.outputs.repo_lower }}
+          DATE_CN: ${{ steps.sync.outputs.date_cn }}
+          UPSTREAM_DIGEST: ${{ steps.sync.outputs.upstream_digest }}
+          HAS_UPDATE: ${{ steps.sync.outputs.has_update }}
         run: |
-          REPO_LOWER="${{ steps.sync.outputs.repo_lower }}"
-          DATE_CN="${{ steps.sync.outputs.date_cn }}"
-          DIGEST="${{ steps.sync.outputs.upstream_digest }}"
-          SHORT_DIGEST=$(echo $DIGEST | cut -c1-19)
-          HAS_UPDATE="${{ steps.sync.outputs.has_update }}"
+          python3 << 'PYEOF'
+          import re, os
 
-          if [ "$HAS_UPDATE" == "true" ]; then
-            STATUS="🆕 已更新"
-          else
-            STATUS="✅ 无变化"
-          fi
+          repo_lower = os.environ["REPO_LOWER"]
+          date_cn    = os.environ["DATE_CN"]
+          digest     = os.environ["UPSTREAM_DIGEST"]
+          has_update = os.environ["HAS_UPDATE"]
 
-          # 用 Python 精确替换 README 中的状态块，避免 shell 转义问题
-          python3 << PYEOF
-          import re
+          short_digest = digest[:19]
+          status = "🆕 已更新" if has_update == "true" else "✅ 无变化"
+
+          new_block = (
+              "<!-- SYNC_STATUS_START -->\n"
+              "| 项目 | 内容 |\n"
+              "|---|---|\n"
+              f"| 检测时间 | {date_cn} |\n"
+              f"| 状态 | {status} |\n"
+              f"| 镜像地址 | `ghcr.io/{repo_lower}:latest` |\n"
+              f"| Digest | `{short_digest}...` |\n"
+              "<!-- SYNC_STATUS_END -->"
+          )
 
           with open("README.md", "r") as f:
               content = f.read()
 
-          new_block = f"""<!-- SYNC_STATUS_START -->
-          | 项目 | 内容 |
-          |---|---|
-          | 检测时间 | {DATE_CN} |
-          | 状态 | {STATUS} |
-          | 镜像地址 | \`ghcr.io/{REPO_LOWER}:latest\` |
-          | Digest | \`{SHORT_DIGEST}...\` |
-          <!-- SYNC_STATUS_END -->"""
-
-          # 替换已有块，或在指定位置插入
           if "<!-- SYNC_STATUS_START -->" in content:
               content = re.sub(
                   r"<!-- SYNC_STATUS_START -->.*?<!-- SYNC_STATUS_END -->",
