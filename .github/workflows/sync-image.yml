@@ -1,0 +1,123 @@
+name: Sync Docker Image & Update README
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天 UTC 02:00（北京时间 10:00）
+  workflow_dispatch:      # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check and sync image
+        id: sync
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          DATE_CN=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M CST')
+
+          # 拉取上游最新镜像
+          docker pull cmliu/webssh:latest
+
+          # 获取上游 digest
+          UPSTREAM_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' cmliu/webssh:latest | cut -d'@' -f2)
+
+          # 尝试获取本仓库当前 digest（如果存在）
+          CURRENT_DIGEST=""
+          if docker pull ghcr.io/${REPO_LOWER}:latest 2>/dev/null; then
+            CURRENT_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${REPO_LOWER}:latest | cut -d'@' -f2 || echo "")
+          fi
+
+          echo "upstream_digest=$UPSTREAM_DIGEST" >> $GITHUB_OUTPUT
+          echo "current_digest=$CURRENT_DIGEST" >> $GITHUB_OUTPUT
+          echo "repo_lower=$REPO_LOWER" >> $GITHUB_OUTPUT
+          echo "date_cn=$DATE_CN" >> $GITHUB_OUTPUT
+
+          # 判断是否有更新
+          if [ "$UPSTREAM_DIGEST" != "$CURRENT_DIGEST" ]; then
+            echo "has_update=true" >> $GITHUB_OUTPUT
+            echo "✅ 检测到新版本，开始同步..."
+          else
+            echo "has_update=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ 无更新，镜像已是最新"
+          fi
+
+      - name: Push updated image
+        if: steps.sync.outputs.has_update == 'true'
+        run: |
+          REPO_LOWER="${{ steps.sync.outputs.repo_lower }}"
+          docker tag cmliu/webssh:latest ghcr.io/${REPO_LOWER}:latest
+          docker push ghcr.io/${REPO_LOWER}:latest
+          echo "✅ 已推送 ghcr.io/${REPO_LOWER}:latest"
+
+      - name: Update README.md
+        run: |
+          REPO_LOWER="${{ steps.sync.outputs.repo_lower }}"
+          DATE_CN="${{ steps.sync.outputs.date_cn }}"
+          DIGEST="${{ steps.sync.outputs.upstream_digest }}"
+          SHORT_DIGEST=$(echo $DIGEST | cut -c1-19)
+          HAS_UPDATE="${{ steps.sync.outputs.has_update }}"
+
+          if [ "$HAS_UPDATE" == "true" ]; then
+            STATUS="🆕 已更新"
+          else
+            STATUS="✅ 无变化"
+          fi
+
+          # 用 Python 精确替换 README 中的状态块，避免 shell 转义问题
+          python3 << PYEOF
+          import re
+
+          with open("README.md", "r") as f:
+              content = f.read()
+
+          new_block = f"""<!-- SYNC_STATUS_START -->
+          | 项目 | 内容 |
+          |---|---|
+          | 检测时间 | {DATE_CN} |
+          | 状态 | {STATUS} |
+          | 镜像地址 | \`ghcr.io/{REPO_LOWER}:latest\` |
+          | Digest | \`{SHORT_DIGEST}...\` |
+          <!-- SYNC_STATUS_END -->"""
+
+          # 替换已有块，或在指定位置插入
+          if "<!-- SYNC_STATUS_START -->" in content:
+              content = re.sub(
+                  r"<!-- SYNC_STATUS_START -->.*?<!-- SYNC_STATUS_END -->",
+                  new_block,
+                  content,
+                  flags=re.DOTALL
+              )
+          else:
+              content += "\n\n" + new_block + "\n"
+
+          with open("README.md", "w") as f:
+              f.write(content)
+
+          print("README 已更新")
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add README.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🔄 sync check: $(TZ='Asia/Shanghai' date '+%Y-%m-%d')"
+            git push
+          fi
