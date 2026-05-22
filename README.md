@@ -11,6 +11,11 @@ docker pull ghcr.io/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME:latest
 ## 最新同步状态
  
 <!-- SYNC_STATUS_START -->
-（首次运行后自动填充）
+| 项目 | 内容 |
+|---|---|
+| 检测时间 | 2026-05-22 11:16 CST |
+| 状态 | ✅ 无变化 |
+| 镜像地址 | `ghcr.io/cfymrq/jx-webssh:latest` |
+| Digest | `sha256:c817799737f2...` |
 <!-- SYNC_STATUS_END -->
  
