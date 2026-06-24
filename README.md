@@ -13,7 +13,7 @@ docker pull ghcr.io/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME:latest
 <!-- SYNC_STATUS_START -->
 | 项目 | 内容 |
 |---|---|
-| 检测时间 | 2026-06-23 14:15 CST |
+| 检测时间 | 2026-06-24 14:13 CST |
 | 状态 | ✅ 无变化 |
 | 镜像地址 | `ghcr.io/cfymrq/jx-webssh:latest` |
 | Digest | `sha256:c817799737f2...` |
